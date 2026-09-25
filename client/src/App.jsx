@@ -10,7 +10,14 @@ import Modal from "./components/Modal.jsx";
 import About from "./components/About.jsx";
 import DebugLogs from "./components/DebugLogs.jsx";
 
-const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:8080";
+const apiUrl =
+  import.meta.env.VITE_API_URL ||
+  (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+      ? 'http://localhost:8080'
+      : window.location.origin
+  );
 
 function AppContent() {
   const [tasks, setTasks] = useState([]);

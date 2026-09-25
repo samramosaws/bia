@@ -1,217 +1,247 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from "react";
 
-const VersionInfo = () => {
-  const [showVersion, setShowVersion] = useState(false);
-  const [apiStatus, setApiStatus] = useState('checking'); // 'checking', 'online', 'offline'
-  const [apiVersion, setApiVersion] = useState('4.0.0');
-  const [cacheConfig, setCacheConfig] = useState(null);
+const getApiUrl = () => {
+  const hostname = window.location.hostname;
 
-  const getApiUrl = () => {
-    // Se estiver definido no ambiente (Docker/Produção)
-    if (import.meta.env.VITE_API_URL) {
-      return import.meta.env.VITE_API_URL;
-    }
-    
-    // Se estiver rodando no mesmo domínio (produção integrada)
-    if (window.location.port === '8080') {
-      return window.location.origin;
-    }
-    
-    // Desenvolvimento local - inferir porta 8080
-    return 'http://localhost:8080';
-  };
+  // Caso exista uma URL explicitamente configurada
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL.replace(/\/$/, "");
+  }
+
+  // Desenvolvimento local
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "http://localhost:8080";
+  }
+
+  // ALB, CloudFront ou domínio de produção:
+  // frontend e backend respondem pelo mesmo endereço
+  return window.location.origin;
+};
+
+const getEnvironment = () => {
+  const hostname = window.location.hostname;
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return "Local";
+  }
+
+  if (hostname.endsWith(".cloudfront.net")) {
+    return "CloudFront";
+  }
+
+  if (hostname.endsWith(".elb.amazonaws.com")) {
+    return "ALB";
+  }
+
+  return "Produção";
+};
+
+export default function VersionInfo() {
+  const [version, setVersion] = useState("Bia");
+  const [status, setStatus] = useState("Checking");
+  const [isOpen, setIsOpen] = useState(false);
+
+  const apiUrl = getApiUrl();
+  const environment = getEnvironment();
 
   const checkApiHealth = async () => {
-    setApiStatus('checking');
-    try {
-      const apiUrl = getApiUrl();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-      
-      const response = await fetch(`${apiUrl}/api/versao`, {
-        signal: controller.signal,
-        method: 'GET',
-        cache: 'no-cache'
-      });
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const versionText = await response.text();
-        setApiVersion(versionText);
-        setApiStatus('online');
+    setStatus("Checking");
 
-        // Buscar config do cache
-        try {
-          const cacheRes = await fetch(`${apiUrl}/api/cache-config`, { cache: 'no-cache' });
-          if (cacheRes.ok) setCacheConfig(await cacheRes.json());
-        } catch {}
-      } else {
-        setApiStatus('offline');
+    try {
+      const controller = new AbortController();
+
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 5000);
+
+      const response = await fetch(`${apiUrl}/api/versao`, {
+        method: "GET",
+        cache: "no-cache",
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
+
+      const contentType = response.headers.get("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+
+        setVersion(
+          data.version ||
+            data.versao ||
+            data.name ||
+            data.message ||
+            "Bia"
+        );
+      } else {
+        const text = await response.text();
+        setVersion(text.trim() || "Bia");
+      }
+
+      setStatus("Online");
     } catch (error) {
-      console.warn('API Health Check falhou:', error.message);
-      setApiStatus('offline');
+      console.error("Erro ao verificar API:", error);
+
+      setStatus("Offline");
     }
   };
 
   useEffect(() => {
     checkApiHealth();
-    // Recheck a cada 30 segundos
-    const interval = setInterval(checkApiHealth, 30000);
-    return () => clearInterval(interval);
   }, []);
 
-  const handleVersionClick = () => {
-    setShowVersion(!showVersion);
-    if (!showVersion) {
-      // Recheca quando abre o tooltip
-      checkApiHealth();
-    }
-  };
+  const statusColor =
+    status === "Online"
+      ? "#22c55e"
+      : status === "Checking"
+      ? "#facc15"
+      : "#ef4444";
 
-  const openVersionEndpoint = () => {
-    const apiUrl = getApiUrl();
-    window.open(`${apiUrl}/api/versao`, '_blank');
-  };
+  const statusIcon =
+    status === "Online"
+      ? "🟢"
+      : status === "Checking"
+      ? "🟡"
+      : "🔴";
 
-  const getStatusIcon = () => {
-    switch (apiStatus) {
-      case 'online': return '🟢';
-      case 'offline': return '🔴';
-      case 'checking': return '🟡';
-      default: return '⚪';
-    }
-  };
-
-  const getStatusText = () => {
-    switch (apiStatus) {
-      case 'online': return 'Online';
-      case 'offline': return 'Offline';
-      case 'checking': return 'Verificando...';
-      default: return 'Desconhecido';
-    }
-  };
-
-  const getEnvironmentInfo = () => {
-    const { protocol, hostname, port } = window.location;
-    
-    // Detectar tipo de ambiente
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-      return {
-        type: 'local',
-        icon: '🏠',
-        label: 'Local',
-        description: `${hostname}:${port}`,
-        color: '#3b82f6' // azul
-      };
-    }
-    
-    // IP direto sem HTTPS
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) && protocol === 'http:') {
-      return {
-        type: 'ip-http',
-        icon: '🌐',
-        label: 'IP Direto',
-        description: `${hostname}${port ? ':' + port : ''}`,
-        color: '#f59e0b' // amarelo/laranja
-      };
-    }
-    
-    // ALB/Load Balancer sem HTTPS
-    if (protocol === 'http:' && hostname.includes('.elb.')) {
-      return {
-        type: 'alb-http',
-        icon: '⚖️',
-        label: 'ALB HTTP',
-        description: hostname,
-        color: '#ef4444' // vermelho
-      };
-    }
-    
-    // Domínio com HTTPS (produção)
-    if (protocol === 'https:') {
-      return {
-        type: 'domain-https',
-        icon: '🔒',
-        label: 'Produção',
-        description: hostname,
-        color: '#22c55e' // verde
-      };
-    }
-    
-    // Outros casos
-    return {
-      type: 'other',
-      icon: '❓',
-      label: 'Outro',
-      description: `${hostname}${port ? ':' + port : ''}`,
-      color: '#6b7280' // cinza
-    };
-  };
+  const environmentIcon =
+    environment === "CloudFront"
+      ? "🌐"
+      : environment === "ALB"
+      ? "⚖️"
+      : environment === "Local"
+      ? "💻"
+      : "🔒";
 
   return (
-    <div className="version-info">
-      <button 
-        className={`version-trigger ${apiStatus} ${getEnvironmentInfo().type}`}
-        onClick={handleVersionClick}
-        title={`${getEnvironmentInfo().icon} ${getEnvironmentInfo().label} | API: ${getStatusText()}`}
+    <div
+      className="version-info"
+      style={{
+        position: "relative",
+        display: "inline-block",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        title={`${environment} | API: ${status}`}
+        aria-label="Informações da versão"
         style={{
-          borderColor: apiStatus === 'online' ? getEnvironmentInfo().color : 
-                      apiStatus === 'offline' ? '#ef4444' : 
-                      '#f59e0b'
+          width: "22px",
+          height: "22px",
+          borderRadius: "50%",
+          border: "2px solid #2563eb",
+          background: "transparent",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: 0,
+          cursor: "pointer",
         }}
       >
-        {getStatusIcon()}
+        <span
+          style={{
+            width: "12px",
+            height: "12px",
+            borderRadius: "50%",
+            backgroundColor: statusColor,
+            display: "block",
+          }}
+        />
       </button>
-             {showVersion && (
-         <div className="version-tooltip">
-           <div className="version-content">
-             <strong>{apiVersion}</strong>
-             <div className="version-details">
-               <small>
-                 <span className="status-indicator">{getStatusIcon()}</span>
-                 Status: {getStatusText()}
-               </small>
-               <small>
-                 <span 
-                   className="env-indicator" 
-                   style={{ color: getEnvironmentInfo().color }}
-                 >
-                   {getEnvironmentInfo().icon}
-                 </span>
-                 Ambiente: {getEnvironmentInfo().label}
-               </small>
-               <small>Local: {getEnvironmentInfo().description}</small>
-               <small>API: {getApiUrl()}</small>
-               {cacheConfig && cacheConfig.enabled && (
-                 <small>Cache: {cacheConfig.endpoint}:{cacheConfig.port} - {cacheConfig.ttl}s</small>
-               )}
-               <small>
-                 <button 
-                   className="version-link" 
-                   onClick={openVersionEndpoint}
-                   title="Abrir endpoint de versão"
-                 >
-                   🔗 /api/versao
-                 </button>
-               </small>
-               <small>
-                 <button 
-                   className="version-link refresh-btn" 
-                   onClick={checkApiHealth}
-                   title="Verificar status da API"
-                   disabled={apiStatus === 'checking'}
-                 >
-                   🔄 {apiStatus === 'checking' ? 'Verificando...' : 'Atualizar'}
-                 </button>
-               </small>
-             </div>
-           </div>
-         </div>
-       )}
+
+      {isOpen && (
+        <div
+          className="version-info-popup"
+          style={{
+            position: "absolute",
+            top: "32px",
+            right: 0,
+            zIndex: 9999,
+            width: "240px",
+            padding: "14px",
+            borderRadius: "8px",
+            backgroundColor: "#1f2937",
+            border: "1px solid #374151",
+            boxShadow: "0 10px 25px rgba(0, 0, 0, 0.35)",
+            color: "#f9fafb",
+            fontSize: "13px",
+            lineHeight: 1.5,
+          }}
+        >
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: "15px",
+              marginBottom: "8px",
+            }}
+          >
+            {version}
+          </div>
+
+          <div>
+            {statusIcon} Status: {status}
+          </div>
+
+          <div>
+            {environmentIcon} Ambiente: {environment}
+          </div>
+
+          <div
+            style={{
+              marginTop: "4px",
+              wordBreak: "break-word",
+            }}
+          >
+            Local: {window.location.host}
+          </div>
+
+          <div
+            style={{
+              marginTop: "4px",
+              wordBreak: "break-word",
+            }}
+          >
+            API:
+            <br />
+            {apiUrl}
+          </div>
+
+          <div style={{ marginTop: "6px" }}>
+            🔗{" "}
+            <a
+              href={`${apiUrl}/api/versao`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "#60a5fa" }}
+            >
+              /api/versao
+            </a>
+          </div>
+
+          <button
+            type="button"
+            onClick={checkApiHealth}
+            style={{
+              marginTop: "6px",
+              padding: 0,
+              border: "none",
+              background: "transparent",
+              color: "#60a5fa",
+              textDecoration: "underline",
+              cursor: "pointer",
+              fontSize: "13px",
+            }}
+          >
+            🔄 Atualizar
+          </button>
+        </div>
+      )}
     </div>
   );
-};
-
-export default VersionInfo; 
+}

@@ -18,7 +18,11 @@ RUN cd client && npm install --legacy-peer-deps --loglevel=error
 COPY . .
 
 # Build do front-end com Vite
+<<<<<<< HEAD
 RUN cd client && VITE_API_URL=http://bia-alb-12731236.us-east-1.elb.amazonaws.com npm run build
+=======
+RUN cd client && npm run build
+>>>>>>> e9c5d4d (corrige frontend para ALB e CloudFront)
 
 # Limpeza das dependências de desenvolvimento do client para reduzir tamanho
 RUN cd client && npm prune --production && rm -rf node_modules/.cache
